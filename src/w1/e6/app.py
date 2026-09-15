@@ -8,7 +8,8 @@ __next = 1
 BOOKS = [{
     "id": 1,
     "title": "Clean Code",
-    "author": "R. Martin"
+    "author": "R. Martin",
+    "year": 1900
 }]
 
 
@@ -19,7 +20,8 @@ def find(bid: int):
 @app.route("/books", methods=["GET"])
 def list_books():
     n = int(request.args.get("limit", 100))
-    return jsonify(BOOKS[:n]), 200
+    books = BOOKS[:n].sort(key=lambda v: v["author"])
+    return jsonify(books), 200
 
 
 @app.route("/books/<int:bid>", methods=["GET"])
@@ -37,12 +39,16 @@ def create_book():
     body = request.get_json(silent=True) or {}
     t: str | None = body.get("title")
     a: str | None = body.get("author")
+    y: int | None = body.get("year")
 
     if not t or not a:
         return { "error": "need title+author" }, 404
 
+    if not isinstance(y, int) or y < 1900:
+        return { "error": "year must be >= 1900" }, 404
+
     global __next
-    book = { "id": __next, "title": t, "author": a }
+    book = { "id": __next, "title": t, "author": a, "year" : y }
     __next += 1
     BOOKS.append(book)
     return jsonify(book), 201, {"Location": f"/books/{book['id']}"}
