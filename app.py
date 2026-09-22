@@ -1,71 +1,64 @@
-from flask import Flask, jsonify, request
-from uuid import uuid4
+from flask import Flask, jsonify, make_response, request
+
 
 app = Flask(__name__)
-STUDENTS = []
-BOOKS = [{ "t": "app" }, { "t": "wa" }, { "t": "" }, { "t": "not" }]
-ORDERS = {}
+BOOKS = []
+DEFAULT_SIZE = 20
+MAX_SIZE = 100
 
-@app.route("/orders/<id>", methods=["DELETE"])
-def delete_order(id: str):
-    order = ORDERS.get(id)
+@app.get("/books")
+def list_books():
+    try:
+        page = int(request.args.get("page", 1))
+        size = int(request.args.get("size", DEFAULT_SIZE))
+    except ValueError:
+        return jsonify(error="page and size must be int"), 400
 
-    if order is None:
-        return { "error": "not found" }, 404
+    page = max(page, 1)
+    size = max(min(size, MAX_SIZE), 1)
 
-    if order["status"] in ("shipped", "delivered"):
-        return { "error": "cannot delete" }, 409
+    flt = BOOKS
+    a: str | None = request.args.get("author")
 
-    ORDERS.pop(id)
-    return "", 204
+    if a: 
+        flt = [b for b in flt if b["author"].lower() == a.lower()]
 
+    q: str = request.args.get("q", "").lower()
 
-@app.route("/books/<int:book_id>", methods=["GET"])
-def get_book(book_id: int):
-    return jsonify({ "id": book_id }), 200
+    if q:
+        flt = [b for b in flt if q in b["title"].lower()]
 
+    total = len(flt)
+    start = (page - 1) * size
+    end = start + size
+    items = flt[start:end]
+    last = (total + size - 1) // size
 
-@app.route("/books", methods=["GET"])
-def list_book():
-    # limit = int(request.args.get("limit", 20))
-    # offset = int(request.args.get("offset", 0))
-    q = request.args.get("q", "").strip().lower()
-    items = [b for b in BOOKS if q in b["t"].lower()]
-    return jsonify({ "items": items }), 200
+    def u(p: int):
+        return f"/books?page={p}&size={size}"
 
+    links = {"self": {"href": u(page - 1)}, "first": {"href": u(1)}, "last": {"href": u(max(last, 1))}}
 
-@app.route("/students", methods=["POST"])
-def create_student():
-    body = request.get_json(silent=True) or {}
-    name = body.get("name")
+    if page > 1:
+        links["prev"] = {"href": u(page - 1)}
 
-    if not name:
-        return jsonify({ "error": "name là bắt buộc" }), 400
+    if end < total:
+        links["next"] = {"href": u(page + 1)}
 
-    student = {
-        "id": str(uuid4()),
-        "name": name,
-        "gpa": body.get("gpa", 0.0)
+    body = {
+        "data": items,
+
+        "pagination": {
+            "page": page,
+            "size": size,
+            "total": total,
+            "total_pages": last
+        }
     }
 
-    STUDENTS.append(student)
-    return jsonify(student), 201
-
-
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({ "status": "ok" }), 200
-
-
-@app.route("/")
-def index():
-    return { "message": "Hello, API!" }
-
-
-@app.route("/echo", methods=["POST"])
-def echo():
-    data = request.get_json(silent=True) or {}
-    return jsonify({ "you_sent": data }), 200
+    resp = make_response(body, 200)
+    resp.headers["Cache-Control"] = "public, max-age=30"
+    return resp
 
 
 if __name__ == "__main__":
