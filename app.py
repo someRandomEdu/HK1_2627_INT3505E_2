@@ -105,4 +105,9 @@ def list_books():
 
 
 if __name__ == "__main__":
+    db.session.add(Book(None, "Book", "Author"))
+    db.session.add(Book(None, "a", "b"))
+    db.session.add(Book(None, "awaa", "abwa"))
+    db.session.add(Book(None, "theory", "practice"))
+    db.session.commit()
     app.run(host="127.0.0.1", port=5000, debug=True)
