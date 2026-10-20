@@ -1,64 +1,107 @@
+from typing import Any
+
+from sqlalchemy import select, func
 from flask import Flask, jsonify, make_response, request
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+def as_any[T](v: Any) -> T: return v
+
+
+class Base(DeclarativeBase):
+    pass
 
 
 app = Flask(__name__)
-BOOKS = []
-DEFAULT_SIZE = 20
-MAX_SIZE = 100
+db = SQLAlchemy(model_class=Base)
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
+db.init_app(app)
 
-@app.get("/books")
-def list_books():
-    try:
-        page = int(request.args.get("page", 1))
-        size = int(request.args.get("size", DEFAULT_SIZE))
-    except ValueError:
-        return jsonify(error="page and size must be int"), 400
 
-    page = max(page, 1)
-    size = max(min(size, MAX_SIZE), 1)
+class Book(db.Model):
+    id: Mapped[int | None] = mapped_column(db.Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(db.String)
+    author: Mapped[str] = mapped_column(db.String)
 
-    flt = BOOKS
-    a: str | None = request.args.get("author")
+    def __init__(self, id: int | None, title: str, author: str):
+        self.id = id
+        self.title = title
+        self.author = author
 
-    if a: 
-        flt = [b for b in flt if b["author"].lower() == a.lower()]
-
-    q: str = request.args.get("q", "").lower()
-
-    if q:
-        flt = [b for b in flt if q in b["title"].lower()]
-
-    total = len(flt)
-    start = (page - 1) * size
-    end = start + size
-    items = flt[start:end]
-    last = (total + size - 1) // size
-
-    def u(p: int):
-        return f"/books?page={p}&size={size}"
-
-    links = {"self": {"href": u(page - 1)}, "first": {"href": u(1)}, "last": {"href": u(max(last, 1))}}
-
-    if page > 1:
-        links["prev"] = {"href": u(page - 1)}
-
-    if end < total:
-        links["next"] = {"href": u(page + 1)}
-
-    body = {
-        "data": items,
-
-        "pagination": {
-            "page": page,
-            "size": size,
-            "total": total,
-            "total_pages": last
+    def to_json(self):
+        return {
+            "id": self.id,
+            "title": self.title,
+            "author": self.author
         }
-    }
 
-    resp = make_response(body, 200)
-    resp.headers["Cache-Control"] = "public, max-age=30"
-    return resp
+
+class Author(db.Model):
+    id: Mapped[int | None] = mapped_column(db.Integer, primary_key=True)
+    bio: Mapped[str] = mapped_column(db.String)
+
+    def __init__(self, id: int | None, bio: str):
+        self.id = id
+        self.bio = bio
+
+    def to_json(self):
+        return {
+            "id": self.id,
+            "bio": self.bio
+        }
+
+
+class User(db.Model):
+    id: Mapped[int | None] = mapped_column(db.Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(db.String)
+    display_name: Mapped[str] = mapped_column(db.String)
+
+
+@app.get("/")
+def list_books():
+    strategy = request.args.get("strategy", "offset")
+    limit = max(min(int(request.args.get("limit", 0)), 0), 20)
+    total = db.session.scalar(select(func.count(Book.id)))
+
+    if strategy == "offset":
+        offset = int(request.args.get("offset", 0))
+        query = select(Book).order_by(Book.id).offset(offset).limit(limit)
+        rows = db.session.scalars(query)
+        books = [b.to_json() for b in rows]
+
+        return {
+            "data": books,
+
+            "pagination": {
+                "offset": offset,
+                "total": total,
+                "limit": limit,
+                "count": len(books),
+                "has_next": offset + limit < total if total is not None else False
+            }
+        }, 200
+    elif strategy == "cursor":
+        id = int(request.args.get("id", 0))
+        query = select(Book).filter(id > Book.id).order_by(Book.id.asc()).fetch(limit)
+        rows = db.session.scalars(query)
+        books = [b.to_json() for b in rows]
+
+        return {
+            "data": books,
+
+            "pagination": {
+                "id": id,
+                "total": total,
+                "limit": limit,
+                "count": len(books)
+            }
+        }, 200
+    else:
+        return {
+            "status": 400,
+            "title": 'Pagination strategy is not equal to either "offset" or "cursor"!'
+        }, 400
 
 
 if __name__ == "__main__":
