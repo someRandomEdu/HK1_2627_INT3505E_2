@@ -1,12 +1,7 @@
-from typing import Any
-
 from sqlalchemy import select, func
 from flask import Flask, jsonify, make_response, request
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
-
-def as_any[T](v: Any) -> T: return v
 
 
 class Base(DeclarativeBase):
@@ -20,12 +15,14 @@ db.init_app(app)
 
 
 class Book(db.Model):
-    id: Mapped[int | None] = mapped_column(db.Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(db.String)
     author: Mapped[str] = mapped_column(db.String)
 
     def __init__(self, id: int | None, title: str, author: str):
-        self.id = id
+        if id is not None:
+            self.id = id
+
         self.title = title
         self.author = author
 
@@ -38,11 +35,13 @@ class Book(db.Model):
 
 
 class Author(db.Model):
-    id: Mapped[int | None] = mapped_column(db.Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(db.Integer, primary_key=True)
     bio: Mapped[str] = mapped_column(db.String)
 
     def __init__(self, id: int | None, bio: str):
-        self.id = id
+        if id is not None:
+            self.id = id
+
         self.bio = bio
 
     def to_json(self):
@@ -53,7 +52,7 @@ class Author(db.Model):
 
 
 class User(db.Model):
-    id: Mapped[int | None] = mapped_column(db.Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(db.Integer, nullable=False, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(db.String)
     display_name: Mapped[str] = mapped_column(db.String)
 
@@ -66,8 +65,8 @@ def list_books():
 
     if strategy == "offset":
         offset = int(request.args.get("offset", 0))
-        query = select(Book).order_by(Book.id).offset(offset).limit(limit)
-        rows = db.session.scalars(query)
+        query = select(Book).offset(offset).order_by(Book.id).limit(limit)
+        rows = db.session.scalars(query).all()
         books = [b.to_json() for b in rows]
 
         return {
@@ -83,8 +82,8 @@ def list_books():
         }, 200
     elif strategy == "cursor":
         id = int(request.args.get("id", 0))
-        query = select(Book).filter(id > Book.id).order_by(Book.id.asc()).fetch(limit)
-        rows = db.session.scalars(query)
+        query = select(Book).where(Book.id > id).order_by(Book.id.asc()).limit(limit)
+        rows = db.session.scalars(query).all()
         books = [b.to_json() for b in rows]
 
         return {
@@ -105,9 +104,17 @@ def list_books():
 
 
 if __name__ == "__main__":
-    db.session.add(Book(None, "Book", "Author"))
-    db.session.add(Book(None, "a", "b"))
-    db.session.add(Book(None, "awaa", "abwa"))
-    db.session.add(Book(None, "theory", "practice"))
-    db.session.commit()
+    with app.app_context():
+        db.create_all()
+
+        db.session.add_all([
+            Book(None, "Book", "Author"), 
+            Book(None, "a", "b"), 
+            Book(None, "abwa", "bar"), 
+            Book(None, "theory", "practice"), 
+            Book(None, "foo", "bar")
+        ])
+
+        db.session.commit()
+
     app.run(host="127.0.0.1", port=5000, debug=True)

@@ -1,8 +1,3 @@
 @route = http://127.0.0.1:5000
 
-POST {{route}}/students
-Content-Type: application/json
-
-{
-    "name": "hu tao~"
-}
+GET {{route}}?strategy=cursor&id=2
