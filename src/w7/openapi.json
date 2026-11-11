@@ -1,0 +1,146 @@
+{
+    "openapi": "3.1.0",
+
+    "info": {
+        "title": "Product app",
+        "version": "1.0.0",
+        "description": "App for managing products"
+    },
+
+    "paths": {
+        "/products": {
+            "get": {
+                "operationId": "products.list_products",
+                
+                "responses": {
+                    "200": {
+                        "description": "Ok",
+
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+
+                                    "items": {
+                                        "$ref": "#/components/schemas/Product"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+
+            "post": {
+                "operationId": "products.create_product",
+
+                "requestBody": {
+                    "required": true,
+
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ProductIn"
+                            }
+                        }
+                    }
+                },
+
+                "responses": {
+                    "201": {
+                        "description": "Product created",
+
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Product"
+                                }
+                            }
+                        }
+                    },
+
+                    "422": {
+                        "description": "Request body has the wrong format!"
+                    }
+                }
+            }
+        },
+
+        "/products/{id}": {
+            "get": {
+                "operationId": "products.get_product",
+
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+
+                "responses": {
+                    "200": {
+                        "description": "Ok",
+
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Product"
+                                }
+                            }
+                        }
+                    },
+
+                    "404": {
+                        "description": "Product not found!"
+                    }
+                }
+            }
+        }
+    },
+
+    "components": {
+        "parameters": {
+
+        },
+
+        "schemas": {
+            "ProductIn": {
+                "type": "object",
+
+                "properties": {
+                    "name": {
+                        "type": "string"
+                    },
+                    
+                    "description": {
+                        "type": "string",
+                        "default": ""
+                    }
+                }
+            },
+
+            "Product": {
+                "type": "object",
+
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+
+                    "name": {
+                        "type": "string"
+                    },
+
+                    "description": {
+                        "type": "string"
+                    }
+                }
+            }
+        }
+    }
+}

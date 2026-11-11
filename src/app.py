@@ -1,7 +1,16 @@
+from dataclasses import dataclass
+from sqlite3 import IntegrityError
+from typing import Any
+import time
+from datetime import datetime
+
 from sqlalchemy import select, func
-from flask import Flask, jsonify, make_response, request
+from flask import Blueprint, Flask, jsonify, make_response, request
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import String, Integer, Boolean, DateTime, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from marshmallow import Schema, fields, validate
+from werkzeug.exceptions import HTTPException
 
 
 class Base(DeclarativeBase):
@@ -14,107 +23,131 @@ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
 db.init_app(app)
 
 
-class Book(db.Model):
-    id: Mapped[int] = mapped_column(db.Integer, primary_key=True, autoincrement=True)
-    title: Mapped[str] = mapped_column(db.String)
-    author: Mapped[str] = mapped_column(db.String)
+@dataclass
+class Product(db.Model):
+    __tablename__ = "products"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(String)
+    price: Mapped[int] = mapped_column(Integer, nullable=False)
+    stock: Mapped[int] = mapped_column(Integer, default=0)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
-    def __init__(self, id: int | None, title: str, author: str):
-        if id is not None:
-            self.id = id
-
-        self.title = title
-        self.author = author
-
-    def to_json(self):
+    def to_dict(self):
         return {
             "id": self.id,
-            "title": self.title,
-            "author": self.author
+            "name": self.name,
+            "price": self.price,
+            "stock": self.stock,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
 
-class Author(db.Model):
-    id: Mapped[int] = mapped_column(db.Integer, primary_key=True)
-    bio: Mapped[str] = mapped_column(db.String)
-
-    def __init__(self, id: int | None, bio: str):
-        if id is not None:
-            self.id = id
-
-        self.bio = bio
-
-    def to_json(self):
-        return {
-            "id": self.id,
-            "bio": self.bio
-        }
+class ProductInSchema(Schema):
+    name = fields.Str(required=True, validate=validate.Length(min=1, max=255))
+    price = fields.Int(load_default=0, validate=validate.Range(min=0))
+    stock = fields.Int(load_default=0, validate=validate.Range(min=0))
+    description = fields.Str(load_default="")
 
 
-class User(db.Model):
-    id: Mapped[int] = mapped_column(db.Integer, nullable=False, primary_key=True, autoincrement=True)
-    email: Mapped[str] = mapped_column(db.String)
-    display_name: Mapped[str] = mapped_column(db.String)
+class ProductOutSchema(Schema):
+    id = fields.Int()
+    name = fields.Str()
+    description = fields.Str(allow_none=True)
+    price = fields.Int()
+    stock = fields.Int()
 
 
-@app.get("/")
-def list_books():
-    strategy = request.args.get("strategy", "offset")
-    limit = max(min(int(request.args.get("limit", 0)), 0), 20)
-    total = db.session.scalar(select(func.count(Book.id)))
+class ProductPatchSchema(Schema):
+    name = fields.Str()
+    price_cents = fields.Int(validate=validate.Range(min=0))
 
-    if strategy == "offset":
-        offset = int(request.args.get("offset", 0))
-        query = select(Book).offset(offset).order_by(Book.id).limit(limit)
-        rows = db.session.scalars(query).all()
-        books = [b.to_json() for b in rows]
 
-        return {
-            "data": books,
+class ReserveInSchema(Schema):
+    qty = fields.Int(required=True, validate=validate.Range(min=1))
 
-            "pagination": {
-                "offset": offset,
-                "total": total,
-                "limit": limit,
-                "count": len(books),
-                "has_next": offset + limit < total if total is not None else False
-            }
-        }, 200
-    elif strategy == "cursor":
-        id = int(request.args.get("id", 0))
-        query = select(Book).where(Book.id > id).order_by(Book.id.asc()).limit(limit)
-        rows = db.session.scalars(query).all()
-        books = [b.to_json() for b in rows]
 
-        return {
-            "data": books,
+products_bp = Blueprint("products", __name__, url_prefix="/api/v1/products")
+product_in_schema = ProductInSchema()
+product_out_schema = ProductOutSchema()
+products_out_schema = ProductOutSchema(many=True)
+product_patch_schema = ProductPatchSchema()
 
-            "pagination": {
-                "id": id,
-                "total": total,
-                "limit": limit,
-                "count": len(books)
-            }
-        }, 200
-    else:
-        return {
-            "status": 400,
-            "title": 'Pagination strategy is not equal to either "offset" or "cursor"!'
-        }, 400
 
+@products_bp.get("")
+def get_products():
+    rows = db.session.execute(db.select(Product)).scalars().all()
+    return jsonify(products_out_schema.dump(rows)), 200
+
+
+@products_bp.post("")
+def create_product():
+    data = request.get_json(silent=True) or {}
+    e = product_in_schema.validate(data)
+
+    if e:
+        return jsonify({ "errors": e }, 422)
+
+    body: Any = product_in_schema.load(data)
+    p = Product(**body)
+    db.session.add(p)
+    db.session.commit()
+    return jsonify(product_out_schema.dump(p)), 201
+
+
+@products_bp.get("/<int:id>")
+def get_product(id: int):
+    p = db.get_or_404(Product, id)
+    return jsonify(products_out_schema.dump(p)), 200
+
+
+@products_bp.patch("/<int:id>")
+def patch_product(id: int):
+    p = db.get_or_404(Product, id)
+    data = request.get_json(silent=True) or {}
+    errors = product_in_schema.validate(data)
+
+    if errors:
+        return jsonify({ "errors": errors }), 422
+
+    body: Any = product_in_schema.load(data, partial=True)
+
+    for k, v in body.items():
+        setattr(p, k, v)
+
+    db.session.commit()
+    return jsonify(), 200
+
+
+@products_bp.delete("/<int:id>")
+def delete_product(id):
+    p = db.get_or_404(Product, id)
+    db.session.delete(p)
+    db.session.commit()
+    return "", 204
+
+
+@app.get("/health")
+def server_health():
+    return "Ok", 200
+
+
+@app.get("/ready")
+def is_server_ready():
+    try:
+        db.session.execute(db.select(Product)).scalar_one()
+        return jsonify({"status" : "Ready"}), 200
+    except Exception as e:
+        return jsonify({
+            "status": "Not ready",
+            "errors": [repr(e)]
+        }), 503
 
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
-
-        db.session.add_all([
-            Book(None, "Book", "Author"), 
-            Book(None, "a", "b"), 
-            Book(None, "abwa", "bar"), 
-            Book(None, "theory", "practice"), 
-            Book(None, "foo", "bar")
-        ])
-
-        db.session.commit()
+        db.session.commit()            
 
     app.run(host="127.0.0.1", port=5000, debug=True)

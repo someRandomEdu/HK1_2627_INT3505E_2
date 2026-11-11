@@ -1,0 +1,65 @@
+{
+    "openapi": "3.1.0",
+
+    "info": {
+        "title": "social-network",
+        "version": "1.0.0",
+        "description": "Social network"
+    },
+
+    "paths": {
+        "/auth/login": {
+            "post": {
+                "description": "Đăng nhập vào hệ thống",
+
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+
+                                "properties": {
+                                    "username": {
+                                        "type": "string"
+                                    },
+
+                                    "password": {
+                                        "type": "string"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+
+                "responses": {
+                    "201": {
+                        "description": "Đăng nhập thành công",
+
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+
+                                    "properties": {
+                                        "token": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+
+                    "400": {
+                        "description": "Sai định dạng thông tin đăng nhập!"
+                    },
+
+                    "401": {
+                        "description": "Thông tin đăng nhập không đúng!"
+                    }
+                }
+            }
+        }
+    }
+}
